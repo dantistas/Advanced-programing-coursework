@@ -3,6 +3,8 @@ import org.apache.commons.lang3.StringUtils; //lang 3 library
 
 import java.io.*;
 import java.net.Socket;
+import java.sql.SQLOutput;
+import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Locale;
@@ -43,22 +45,31 @@ public class ServerWorker extends Thread{
         this.inputStream = clientSocket.getInputStream(); //defines input stream
         this.outputStream = clientSocket.getOutputStream(); //defines output stream
         this.reader = new BufferedReader(new InputStreamReader(inputStream)); // defines buffered reader for input stream
+        checkUsername();
+//        if(this.userName == null){ // if username is not defined, login function is invoked
+//            sendNotification("Enter your username to join the chat server.");
+//        }
 
-        if(this.userName == null){ // if username is not defined, login function is invoked
-            login();
-        }
-        while ((input = reader.readLine()) != null ){ // while user input exist, it is assigned to the user input
+        while ((this.input = reader.readLine()) != null ){ // while user input exist, it is assigned to the user input
             String[] tokens = StringUtils.split(input); // splits the user input by space into array of strings
             if(tokens != null && tokens.length > 0){ // checks if there is strings in the array of strings.
                 String command = tokens[0]; // command is assigned by the first string of the array ex. "private", "user1", "hello world!", string "private" would be assigned as a command.
                 switch(command.toLowerCase()){ //switch statement for the command.
+                    case "login":
+                        String username = tokens[1];
+                        login(username);
+                        break;
                     case "quit":  //case "quit", quit method is invoked.
                         quit(this); // quit method with a parameter of this particular client
                         break;
                     case "private": //case "private", tokens assigned to the new set of array of strings, and invokes sendPrivateMessage method
-                        tokens = StringUtils.split(input, null, 3); //the max amount of strings are 3 in order to not split by the white space of the text body. ex. tokens[0] is command, tokens[1] is userName to send, tokens[2] text body.
-                        sendPrivateMessage(tokens);
-                        break;
+                        if(!checkUsername()){
+                            break;
+                        }else {
+                            tokens = StringUtils.split(input, null, 3); //the max amount of strings are 3 in order to not split by the white space of the text body. ex. tokens[0] is command, tokens[1] is userName to send, tokens[2] text body.
+                            sendPrivateMessage(tokens);
+                            break;
+                        }
                     case "whoisonline": //case whoisonline, info method is invoked
                         info();
                         break;
@@ -69,47 +80,53 @@ public class ServerWorker extends Thread{
                         removeMember(tokens, this); //  parameters: tokens, eg. tokens[0] = command "deletemember", tokens[1] is username of the client from the workers list, that should be deleted from the members list. Another parameter this, which represents the client that invokes this method in order to check if it is a coordinator.
                         break;
                     default: //default case, invokes sendPublicMessage method
-                        tokens = StringUtils.split(input, null, 1); // tokens assigned to the new set of array of strings, in this case, max amount is 1, so the whole input is regarded as one string.
-                        sendPublicMessage(tokens);
-                        break;
+                        if(!checkUsername()){
+                            break;
+                        }else{
+                            tokens = StringUtils.split(input, null, 1); // tokens assigned to the new set of array of strings, in this case, max amount is 1, so the whole input is regarded as one string.
+                            sendPublicMessage(tokens[0]);
+                            break;
+                        }
                 }
             }
         }
     }
 
     // client commands
-    public void login() throws IOException { // login method
-//        sendNotification("Enter IP address and port.");
-//        //todo in front, telnet requires to enter ip and port.
-        sendNotification("Enter your username to join the chat server."); // invokes sendNotification method with one parameter, that is string
-        //todo add ip address and port and id if user vish to add otherwise random
-        while ((input = reader.readLine()) != null && userName == null ){ // while this particular client username and input exists, it is assigned to the user input
-            if(input.length() != 0){ // checks if the input length is not  0, because it cannot assign "nothing" as a username
-                boolean usernameExist = false; // boolean expression if the username already exist
+    public void login(String username) throws IOException { // login method
+        if(username.length() > 0){
+//            boolean usernameExist = false; // boolean expression if the username already exist
+            if(workers.size() > 0){
                 for(ServerWorker client : workers){ //for loop to check if the given username already taken by any other user from the all clients list
-                    if(client.userName.equals(input)){ // checks if the given username matches any username from the all clients list
-                        usernameExist = true; // assigns usernameExist, if there is a match
+                    if(client.userName.equalsIgnoreCase(username)){ // checks if the given username matches any username from the all clients list
+//                    usernameExist = true; // assigns usernameExist, if there is a match
                         sendNotification("Username already exist."); // invokes a sendNotification method
+                    }else{
+                        assignClient(username);
                     }
                 }
-                if(!usernameExist){ // checks if the usernameExist was not assigned as true
-                    this.userName = input; //assigns given username
-                    this.ID = UUID.randomUUID().toString(); // generates random ID, and assigns it
-                    this.IpAddress = clientSocket.getInetAddress().toString(); // assigns ip address of the socket
-                    this.port = clientSocket.getPort(); // assigns port of the socket
-                    workers.add(this); // adds this particular client to the workers list
-                    if(workers.size() == 1){ // checks if all clients list is size of 1, meaning that this client joined the server first
-                        sendNotification("You are the first to join this server."); // sendNotification method is invoked
-                        assignCoordinator(); // assignCoordinator method is invoked
-                        members.add(this); // adds this particular client to the members list
-                    }
-                    sendPublicNotification(userName + " has joined the server."); // sendPublicNotification method is invoked
-                    sendNotification("Welcome to the server " + userName); // sendNotification method is invoked
-                    break; // breaks the while loop
-                }
-            }else{
-                sendNotification("Enter your username to join chat the server."); // sendNotification method is invoked, if the given input length is 0
+            }else {
+                assignClient(username);
             }
+        }
+        checkUsername();
+    }
+
+    public void assignClient(String username) throws IOException {
+        this.userName = username; //assigns given username
+        this.ID = UUID.randomUUID().toString(); // generates random ID, and assigns it
+        this.IpAddress = clientSocket.getInetAddress().toString(); // assigns ip address of the socket
+        this.port = clientSocket.getPort(); // assigns port of the socket
+        workers.add(this); // adds this particular client to the workers list
+        if(workers.size() == 1){ // checks if all clients list is size of 1, meaning that this client joined the server first
+//            sendNotification("You are the first to join this server."); // sendNotification method is invoked
+            assignCoordinator(); // assignCoordinator method is invoked
+            members.add(this); // adds this particular client to the members list
+//            sendPublicNotification(userName + " has joined the server."); // sendPublicNotification method is invoked
+            System.out.println(userName + "kodel ??? joined the server!");
+            sendNotification("Welcome to the server " + userName); // sendNotification method is invoked
+        }else{
+            sendNotification("Welcome to the server " + userName); // sendNotification method is invoked
         }
     }
 
@@ -118,14 +135,16 @@ public class ServerWorker extends Thread{
         if(members.size() > 0){ // checks if there are any members in the members list
             newCoordinator = members.get(0); // if so, gets the first member from the list
             newCoordinator.isCoordinator= true; // assigns its isCoordinator state to true
-            sendPublicNotification(newCoordinator.userName + " has become new coordinator of the server."); // invokes sendPublicNotification method
+//            sendPublicNotification(newCoordinator.userName + " has become new coordinator of the server."); // invokes sendPublicNotification method
         }else if(workers.size() > 0){ // checks if there are any client in the all clients list
             newCoordinator = workers.get(0); //if so, gets the first client from the list
             newCoordinator.isCoordinator= true; // assigns its isCoordinator state to true
             newCoordinator.isAMember = true; // assigns its isAMember state to true
-            sendPublicNotification(newCoordinator.userName + " has become new coordinator of the server."); // invokes sendPublicNotification method
+//            sendPublicNotification(newCoordinator.userName + " has become new coordinator of the server."); // invokes sendPublicNotification method
         }
     }
+
+    // perdaryti po success arba failed notification loginuj
 
     public void quit(ServerWorker client) throws IOException { // quit method
         workers.remove(client); // removes this particular client from the all clients list
@@ -145,11 +164,18 @@ public class ServerWorker extends Thread{
     }
 
     public void sendNotification(String notification) throws IOException { //sendNotification method, with String parameter
-        outputStream.write(notification.getBytes()); // output stream outputs the output.
+        String notificationToSend = "notification " + notification + "\n";
+        outputStream.write(notificationToSend.getBytes()); // output stream outputs the output.
+        outputStream.flush();
+//
+//        clientHandler.bufferedWriter.newLine();
+//        clientHandler.bufferedWriter.flush();
     }
 
-    public void sendPublicMessage(String[] tokens) throws IOException { //sendPublicMessage method, with strings array parameter, in this case String array contains one string which is a body text.
-        String body = userName + ": " + tokens[0]; // constructs a body
+    public void sendPublicMessage(String message) throws IOException { //sendPublicMessage method, with strings array parameter, in this case String array contains one string which is a body text.
+        Timestamp timestamp = new Timestamp(System.currentTimeMillis());
+        String body = "message " + timestamp + " " + userName + ": " + message + "\r\n"; // constructs a body
+        System.out.println(body);
         for(ServerWorker client : workers){ // runs a for loop on all clients list
             client.outputStream.write(body.getBytes()); // selects a client, and outputs output Stream with the text body to each client.
         }
@@ -157,11 +183,12 @@ public class ServerWorker extends Thread{
     }
 
     public void sendPrivateMessage(String[] tokens) throws IOException {//sendPublicMessage method, with strings array parameter.
+        Timestamp timestamp = new Timestamp(System.currentTimeMillis());
         String sendTo = tokens[1]; // assigns sendTo from the input
         String body = tokens[2]; // assigns body from the input
         for(ServerWorker client : workers){ // runs for loop on all the clients
             if(sendTo.equalsIgnoreCase(client.userName)){ // checks if sendTo exist in the all clients list
-                String message = "Private message from " + userName + " >>> " + body; // constructs a message that is going to be sent
+                String message = "message " + timestamp +" Private message from " + userName + " >>> " + body + "\n"; // constructs a message that is going to be sent
                 client.outputStream.write(message.getBytes()); //// selects a client, and outputs output Stream with the message to each client.
             }else{
                 //todo that this username doesnt exist.
@@ -206,6 +233,20 @@ public class ServerWorker extends Thread{
         }else{ // if the client which invoked this method is not a coordinator
             sendNotification("Only coordinators allowed to remove members."); // invokes sendPublicNotification method
         }
+    }
+
+    public boolean checkUsername () throws IOException {
+        if(this.userName == null){
+            sendNotification("Enter your username to join the chat server.");
+            return false;
+        }else{
+            return true;
+        }
+    }
+
+    public ServerWorker getUsername() {
+
+        return this;
     }
 }
 
